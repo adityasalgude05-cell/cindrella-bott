@@ -16,11 +16,12 @@ def keep_alive(): Thread(target=run).start()
 
 # --- Configuration ---
 TOKEN = os.getenv("TOKEN")
-ANIMATED_GIF_URL = "https://cdn.discordapp.com/attachments/1427316841482551306/1465341734493093911/2544-car.gif" 
+ANIMATED_GIF_URL = "https://cdn.discordapp.com/attachments/1427316841482551306/1466854770894438563/7bb9ed00d54da2404408d685534a36d4.gif?ex=6996a636&is=699554b6&hm=02951d1fc27a1fa865eff17c2b71410f9bd8749a029dd8b58985572677df7616&" 
 INFORMAL_VOICE = "https://discord.com/channels/1416139064947642522/1464906449716121706"
 RP_VOICE = "https://discord.com/channels/1416139064947642522/1464906407949238396"
 INFORMAL_CHANNEL_ID = 1464906135546101975
 RP_FACTORY_CHANNEL_ID = 1464906118437408861
+LOGS_CHANNEL_ID = 1466330191117815829 # 👈 Yahan ID dalo
 RP_TIMES = ['15:50', '21:50', '03:50']
 
 intents = discord.Intents.default()
@@ -28,123 +29,156 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- 🎭 LUXURY UI SYSTEM ---
+# --- 🛡️ Error-Proof Logging Function ---
+async def send_log(title, description, color=0x3498db):
+    try:
+        log_ch = bot.get_channel(LOGS_CHANNEL_ID)
+        if log_ch:
+            embed = discord.Embed(title=title, description=description, color=color)
+            embed.timestamp = datetime.now(pytz.timezone('Asia/Kolkata'))
+            await log_ch.send(embed=embed)
+    except Exception as e:
+        print(f"Log Error (Ignoring): {e}") # Bot crash nahi hoga
+
 class LuxuryView(discord.ui.View):
-    def __init__(self, voice_link, max_slots, is_rp=False, title="Event"):
+    def __init__(self, voice_link, max_slots, title="Event"):
         super().__init__(timeout=None) 
         self.max_slots = max_slots
-        self.is_rp = is_rp
         self.title = title
         self.current_members = []
-        self.message = None
+        self.is_disabled = False 
         self.add_item(discord.ui.Button(label="🔊 Join Voice", url=voice_link, style=discord.ButtonStyle.link))
 
-    async def auto_disable(self):
-        """10 Minute Timer to Lock Buttons"""
+    async def auto_disable(self, message):
         await asyncio.sleep(600) 
-        for item in self.children:
-            if not hasattr(item, 'url'):
-                item.disabled = True
-        if self.message:
-            try: await self.message.edit(view=self)
+        if not self.is_disabled:
+            self.is_disabled = True
+            for item in self.children:
+                if not hasattr(item, 'url'): item.disabled = True
+            try:
+                p_list = "\n".join([f"› {m.mention}" for m in self.current_members]) or "*No one registered*"
+                embed = message.embeds[0]
+                embed.description = "─── ⋆⋅☆⋅⋆ ───\n🚫 **EVENT IS OVER | REGISTRATION CLOSED**\nTime limit exceeded (10 Mins).\n─── ⋆⋅☆⋅⋆ ───"
+                embed.set_field_at(0, name=f"👥 Final Participants ({len(self.current_members)})", value=p_list, inline=False)
+                await message.edit(embed=embed, view=self)
+                await send_log("⏰ Auto-Closed", f"Event **{self.title}** closed after 10 mins.", color=0xe67e22)
             except: pass
 
     @discord.ui.button(label="✨ Register", style=discord.ButtonStyle.success)
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer() # Interaction Failed Fix
-        if interaction.user in self.current_members:
-            return await interaction.followup.send("❌ Pehle se register ho!", ephemeral=True)
-        if len(self.current_members) >= self.max_slots:
-            return await interaction.followup.send("🚫 Slots full!", ephemeral=True)
+        if self.is_disabled: return await interaction.response.send_message("❌ Registration Closed!", ephemeral=True)
+        await interaction.response.defer()
+        if interaction.user in self.current_members: return await interaction.followup.send("❌ Already registered!", ephemeral=True)
+        if len(self.current_members) >= self.max_slots: return await interaction.followup.send("🚫 Slots Full!", ephemeral=True)
         
         self.current_members.append(interaction.user)
-        try: 
-            await interaction.user.send(f"✅ Success! Tumne **{self.title}** ke liye register kar liya hai.")
+        await send_log("✅ Member Registered", f"**{interaction.user}** joined **{self.title}**", color=0x2ecc71)
+        try: await interaction.user.send(f"✅ Registered for **{self.title}**!")
         except: pass
         await self.update_ui(interaction)
 
     @discord.ui.button(label="❌ Leave", style=discord.ButtonStyle.danger)
     async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.is_disabled: return await interaction.response.send_message("❌ Over!", ephemeral=True)
         await interaction.response.defer()
-        if interaction.user not in self.current_members:
-            return await interaction.followup.send("❌ List mein nahi ho!", ephemeral=True)
+        if interaction.user not in self.current_members: return await interaction.followup.send("❌ Not in list!", ephemeral=True)
         
         self.current_members.remove(interaction.user)
-        try:
-            await interaction.user.send(f"⚠️ Tumne **{self.title}** se apna naam hata liya hai.")
+        await send_log("⚠️ Member Left", f"**{interaction.user}** left **{self.title}**", color=0xe74c3c)
+        try: await interaction.user.send(f"⚠️ Left **{self.title}**.")
         except: pass
         await self.update_ui(interaction)
 
-    async def update_ui(self, interaction):
-        if self.is_rp:
-            main = self.current_members[:25]
-            subs = self.current_members[25:]
-            p_list = "**Main Squad (25):**\n" + ("\n".join([f"• {m.mention}" for m in main]) or "*Waiting...*")
-            if subs: p_list += "\n\n**Substitutes (5):**\n" + "\n".join([f"• {m.mention}" for m in subs])
-        else:
-            p_list = "\n".join([f"• {m.mention}" for m in self.current_members]) or "*Waiting...*"
+    @discord.ui.button(label="🛑 End Event", style=discord.ButtonStyle.secondary)
+    async def end_event(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("❌ Only Admin!", ephemeral=True)
+        
+        self.is_disabled = True
+        p_list = "\n".join([f"› {m.mention}" for m in self.current_members]) or "*No one registered*"
+        self.clear_items()
+        for item in self.children:
+             if hasattr(item, 'url'): self.add_item(item)
+        
+        embed = interaction.message.embeds[0]
+        embed.description = "─── ⋆⋅☆⋅⋆ ───\n🏁 **EVENT IS OVER | REGISTRATION CLOSED**\nEnded by Admin.\n─── ⋆⋅☆⋅⋆ ───"
+        embed.set_field_at(0, name=f"👥 Final Participants ({len(self.current_members)})", value=p_list, inline=False)
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+        await send_log("🛑 Event Ended", f"Admin **{interaction.user}** ended **{self.title}**.", color=0x000000)
 
+    async def update_ui(self, interaction):
+        p_list = "\n".join([f"› {m.mention}" for m in self.current_members]) or "*Waiting...*"
         embed = interaction.message.embeds[0]
         embed.set_field_at(0, name=f"👥 Participants ({len(self.current_members)}/{self.max_slots})", value=p_list, inline=False)
         await interaction.edit_original_response(embed=embed, view=self)
 
-# --- ⏰ AUTO LOOP ---
+@bot.command()
+async def setup_event(ctx):
+    def check(m): return m.author == ctx.author and m.channel == ctx.channel
+    try:
+        q1 = await ctx.send("❓ **Step 1:** Kaunse channel mein event bheju? (#mention karein)")
+        msg = await bot.wait_for('message', check=check, timeout=60.0)
+        target_channel = msg.channel_mentions[0] if msg.channel_mentions else ctx.channel
+
+        q2 = await ctx.send("❓ **Step 2:** Kitne members allow karne hain?")
+        msg = await bot.wait_for('message', check=check, timeout=60.0)
+        slots = int(msg.content)
+
+        q3 = await ctx.send("❓ **Step 3:** VC ki link paste karein.")
+        msg = await bot.wait_for('message', check=check, timeout=60.0)
+        vc_link = msg.content
+
+        q4 = await ctx.send("❓ **Step 4:** Event ka naam kya hai?")
+        msg = await bot.wait_for('message', check=check, timeout=60.0)
+        event_title = msg.content
+
+        embed = discord.Embed(title=f"🏆 {event_title.upper()}", color=0x00ff00)
+        embed.description = "─── ⋆⋅☆⋅⋆ ───\n✨ **REGISTRATION OPEN (10 MINS)**\n─── ⋆⋅☆⋅⋆ ───"
+        embed.add_field(name=f"👥 Participants (0/{slots})", value="*Waiting...*", inline=False)
+        embed.set_image(url=ANIMATED_GIF_URL)
+        
+        view = LuxuryView(vc_link, slots, title=event_title)
+        event_msg = await target_channel.send("@everyone", embed=embed, view=view)
+        asyncio.create_task(view.auto_disable(event_msg))
+        
+        await ctx.send(f"✅ Event posted in {target_channel.mention}!")
+        await send_log("🛠️ Event Created", f"Admin **{ctx.author}** created **{event_title}**.")
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 @tasks.loop(minutes=1)
 async def auto_loop():
     IST = pytz.timezone('Asia/Kolkata')
     now = datetime.now(IST)
-    now_hm = now.strftime("%H:%M")
-
-    # Informal (Every hour at :00)
     if now.minute == 0:
         ch = bot.get_channel(INFORMAL_CHANNEL_ID)
         if ch:
-            embed = discord.Embed(title="👑 OFFICIAL INFORMAL", description="─── ⋆⋅☆⋅⋆ ───\nRegistration open! Join now.\n─── ⋆⋅☆⋅⋆ ───", color=0x2b2d31)
+            view = LuxuryView(INFORMAL_VOICE, 10, title="Informal")
+            embed = discord.Embed(title="👑 INFORMAL", color=0x5865F2)
+            embed.description = "─── ⋆⋅☆⋅⋆ ───\n✨ **REGISTRATION OPEN (10 MINS)**\n─── ⋆⋅☆⋅⋆ ───"
             embed.add_field(name="👥 Participants (0/10)", value="*Waiting...*", inline=False)
             embed.set_image(url=ANIMATED_GIF_URL)
-            view = LuxuryView(INFORMAL_VOICE, 10, title="Informal")
             msg = await ch.send("@everyone", embed=embed, view=view)
-            view.message = msg
-            asyncio.create_task(view.auto_disable())
+            asyncio.create_task(view.auto_disable(msg))
+            await send_log("🤖 Auto-Event", "Hourly Informal started.")
 
-    # RP Loop (Fixed Timings)
-    if now_hm in RP_TIMES:
+    if now.strftime("%H:%M") in RP_TIMES:
         ch = bot.get_channel(RP_FACTORY_CHANNEL_ID)
         if ch:
-            embed = discord.Embed(title="🏭 RP FACTORY", description="─── ⋆⋅☆⋅⋆ ───\nStarts in 10 mins! Register fast.\n─── ⋆⋅☆⋅⋆ ───", color=0xffd700)
+            view = LuxuryView(RP_VOICE, 30, title="RP Factory")
+            embed = discord.Embed(title="🏭 RP FACTORY", color=0xffd700)
+            embed.description = "─── ⋆⋅☆⋅⋆ ───\n🔥 **REGISTRATION OPEN (10 MINS)**\n─── ⋆⋅☆⋅⋆ ───"
             embed.add_field(name="👥 Participants (0/30)", value="*Waiting...*", inline=False)
             embed.set_image(url=ANIMATED_GIF_URL)
-            view = LuxuryView(RP_VOICE, 30, is_rp=True, title="RP Factory")
             msg = await ch.send("@everyone", embed=embed, view=view)
-            view.message = msg
-            asyncio.create_task(view.auto_disable())
-
-# --- 🛠️ COMMANDS ---
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setup_event(ctx):
-    def check(m): return m.author == ctx.author and m.channel == ctx.channel
-    try:
-        await ctx.send("📝 **Event Name?**")
-        name = (await bot.wait_for('message', check=check, timeout=60)).content
-        await ctx.send("🔢 **Slot Limit?**")
-        limit = int((await bot.wait_for('message', check=check, timeout=60)).content)
-        await ctx.send("🔊 **Voice Link?**")
-        vc = (await bot.wait_for('message', check=check, timeout=60)).content
-
-        embed = discord.Embed(title=f"🌟 {name.upper()}", color=0x00aaff)
-        embed.add_field(name=f"👥 Participants (0/{limit})", value="*Waiting...*", inline=False)
-        embed.set_image(url=ANIMATED_GIF_URL)
-        view = LuxuryView(vc, limit, title=name)
-        msg = await ctx.send("@everyone", embed=embed, view=view)
-        view.message = msg
-        asyncio.create_task(view.auto_disable())
-    except:
-        await ctx.send("❌ Error in setup.")
+            asyncio.create_task(view.auto_disable(msg))
+            await send_log("🤖 Auto-Event", "RP Factory started.")
 
 @bot.event
 async def on_ready():
-    print(f"✅ {bot.user} is Online and Ready!")
+    print(f"✅ Bot Live: {bot.user}")
     if not auto_loop.is_running(): auto_loop.start()
 
 keep_alive()
