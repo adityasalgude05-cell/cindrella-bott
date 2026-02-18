@@ -16,12 +16,12 @@ def keep_alive(): Thread(target=run).start()
 
 # --- Configuration ---
 TOKEN = os.getenv("TOKEN")
-ANIMATED_GIF_URL = "https://cdn.discordapp.com/attachments/1427316841482551306/1466854770894438563/7bb9ed00d54da2404408d685534a36d4.gif?ex=6996a636&is=699554b6&hm=02951d1fc27a1fa865eff17c2b71410f9bd8749a029dd8b58985572677df7616&" 
+ANIMATED_GIF_URL = "https://cdn.discordapp.com/attachments/1427316841482551306/1465341734493093911/2544-car.gif" 
 INFORMAL_VOICE = "https://discord.com/channels/1416139064947642522/1464906449716121706"
 RP_VOICE = "https://discord.com/channels/1416139064947642522/1464906407949238396"
 INFORMAL_CHANNEL_ID = 1464906135546101975
 RP_FACTORY_CHANNEL_ID = 1464906118437408861
-LOGS_CHANNEL_ID = 1466330191117815829 # 👈 Yahan ID dalo
+LOGS_CHANNEL_ID = 1466330191117815829 # 👈 Aapne screenshot mein jo ID likhi hai wo yahan daal di hai
 RP_TIMES = ['15:50', '21:50', '03:50']
 
 intents = discord.Intents.default()
@@ -37,8 +37,7 @@ async def send_log(title, description, color=0x3498db):
             embed = discord.Embed(title=title, description=description, color=color)
             embed.timestamp = datetime.now(pytz.timezone('Asia/Kolkata'))
             await log_ch.send(embed=embed)
-    except Exception as e:
-        print(f"Log Error (Ignoring): {e}") # Bot crash nahi hoga
+    except: pass
 
 class LuxuryView(discord.ui.View):
     def __init__(self, voice_link, max_slots, title="Event"):
@@ -113,23 +112,36 @@ class LuxuryView(discord.ui.View):
         embed.set_field_at(0, name=f"👥 Participants ({len(self.current_members)}/{self.max_slots})", value=p_list, inline=False)
         await interaction.edit_original_response(embed=embed, view=self)
 
+# --- 🛠️ IMPROVED INTERACTIVE SETUP ---
 @bot.command()
 async def setup_event(ctx):
     def check(m): return m.author == ctx.author and m.channel == ctx.channel
     try:
-        q1 = await ctx.send("❓ **Step 1:** Kaunse channel mein event bheju? (#mention karein)")
+        # Step 1: Channel (With Fixed Extraction)
+        await ctx.send("❓ **Step 1:** Kaunse channel mein event bheju? (#mention karein)")
         msg = await bot.wait_for('message', check=check, timeout=60.0)
-        target_channel = msg.channel_mentions[0] if msg.channel_mentions else ctx.channel
+        
+        # Channel nikalne ka solid tarika
+        target_channel = None
+        if msg.channel_mentions:
+            target_channel = msg.channel_mentions[0]
+        else:
+            # Agar mention nahi kiya sirf ID di ya naam likha
+            try: target_channel = bot.get_channel(int(msg.content.strip('<#> ')))
+            except: target_channel = ctx.channel
 
-        q2 = await ctx.send("❓ **Step 2:** Kitne members allow karne hain?")
+        # Step 2: Slots
+        await ctx.send("❓ **Step 2:** Kitne members allow karne hain?")
         msg = await bot.wait_for('message', check=check, timeout=60.0)
         slots = int(msg.content)
 
-        q3 = await ctx.send("❓ **Step 3:** VC ki link paste karein.")
+        # Step 3: VC Link
+        await ctx.send("❓ **Step 3:** VC ki link paste karein.")
         msg = await bot.wait_for('message', check=check, timeout=60.0)
         vc_link = msg.content
 
-        q4 = await ctx.send("❓ **Step 4:** Event ka naam kya hai?")
+        # Step 4: Title
+        await ctx.send("❓ **Step 4:** Event ka naam kya hai?")
         msg = await bot.wait_for('message', check=check, timeout=60.0)
         event_title = msg.content
 
@@ -142,12 +154,13 @@ async def setup_event(ctx):
         event_msg = await target_channel.send("@everyone", embed=embed, view=view)
         asyncio.create_task(view.auto_disable(event_msg))
         
-        await ctx.send(f"✅ Event posted in {target_channel.mention}!")
-        await send_log("🛠️ Event Created", f"Admin **{ctx.author}** created **{event_title}**.")
+        await ctx.send(f"✅ Event successfully posted in {target_channel.mention}!")
+        await send_log("🛠️ Event Created", f"Admin **{ctx.author}** created **{event_title}** in {target_channel.mention}.")
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+# --- ⏰ AUTO LOOP ---
 @tasks.loop(minutes=1)
 async def auto_loop():
     IST = pytz.timezone('Asia/Kolkata')
